@@ -36,7 +36,6 @@ app.post('/token', async (req, res) => {
     room,
     canPublish: true,
     canSubscribe: true,
-    canPublishSources: ['camera', 'microphone', 'screen_share', 'screen_share_audio'],
   });
 
   res.json({ token: await at.toJwt(), url: LIVEKIT_URL });
