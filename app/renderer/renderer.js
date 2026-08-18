@@ -14,7 +14,7 @@ const state = {
 const saved = JSON.parse(localStorage.getItem('tela:config') || '{}');
 $('name').value = saved.name || '';
 $('room').value = saved.room || '';
-$('server').value = saved.server || 'http://localhost:3000';
+$('server').value = saved.server || 'https://tela-token-server.onrender.com';
 
 $('joinBtn').addEventListener('click', join);
 $('leaveBtn').addEventListener('click', () => state.room?.disconnect());

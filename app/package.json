@@ -2,14 +2,39 @@
   "name": "tela",
   "version": "1.0.0",
   "description": "Compartilhamento de tela entre amigos via LiveKit",
+  "author": "lukeribeiro95",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "dist": "electron-builder"
   },
   "devDependencies": {
-    "electron": "^32.0.0"
+    "electron": "^32.0.0",
+    "electron-builder": "^25.1.8"
   },
   "dependencies": {
     "livekit-client": "^2.5.0"
+  },
+  "build": {
+    "appId": "com.lukeribeiro.tela",
+    "productName": "Tela",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "artifactName": "Tela-Setup-${version}.exe"
+    },
+    "portable": {
+      "artifactName": "Tela-Portable-${version}.exe"
+    }
   }
 }
