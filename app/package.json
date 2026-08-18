@@ -1,0 +1,15 @@
+{
+  "name": "tela",
+  "version": "1.0.0",
+  "description": "Compartilhamento de tela entre amigos via LiveKit",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^32.0.0"
+  },
+  "dependencies": {
+    "livekit-client": "^2.5.0"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(npm start *)",
+      "Bash(curl -s http://localhost:3000/)",
+      "Bash(git --version)",
+      "Bash(gh --version)",
+      "Bash(git rm *)",
+      "Bash(git add *)",
+      "Bash(git commit *)"
+    ]
+  }
+}

@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Tela</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <section id="join" class="panel">
+    <h1>Tela</h1>
+    <label>
+      Seu nome
+      <input id="name" placeholder="ex: lucas" autocomplete="off">
+    </label>
+    <label>
+      Codigo da sala
+      <input id="room" placeholder="ex: SALA-ABC123" autocomplete="off">
+    </label>
+    <label>
+      Servidor de token
+      <input id="server" placeholder="http://localhost:3000" autocomplete="off">
+    </label>
+    <button id="joinBtn">Entrar</button>
+    <p id="joinErr" class="err"></p>
+  </section>
+
+  <section id="room-view" class="hidden">
+    <header>
+      <span id="roomLabel"></span>
+      <div class="controls">
+        <button id="shareBtn">Compartilhar tela</button>
+        <button id="micBtn">Ligar microfone</button>
+        <button id="leaveBtn" class="danger">Sair</button>
+      </div>
+    </header>
+    <main id="grid"></main>
+    <div id="audio-sink" class="hidden"></div>
+  </section>
+
+  <div id="picker" class="picker hidden">
+    <div class="picker-box">
+      <div class="picker-head">
+        <h2>Escolha o que compartilhar</h2>
+        <button id="pickerCancel" class="ghost">Cancelar</button>
+      </div>
+      <div class="picker-tabs">
+        <button class="tab active" data-tab="screen">Telas</button>
+        <button class="tab" data-tab="window">Janelas</button>
+      </div>
+      <div id="pickerList" class="picker-list"></div>
+    </div>
+  </div>
+
+  <script src="../node_modules/livekit-client/dist/livekit-client.umd.min.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>
