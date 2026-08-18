@@ -9,6 +9,7 @@ const state = {
   tiles: new Map(),
   micEnabled: false,
   screenSharing: false,
+  mutedParticipants: new Set(),
 };
 
 const saved = JSON.parse(localStorage.getItem('tela:config') || '{}');
@@ -109,6 +110,8 @@ function onTrackSubscribed(track, _pub, participant) {
     addVideoTile(track, participant, false);
   } else if (track.kind === Track.Kind.Audio) {
     const el = track.attach();
+    el.dataset.participant = participant.identity;
+    if (state.mutedParticipants.has(participant.identity)) el.muted = true;
     audioSink.appendChild(el);
     state.tiles.set(track.sid, el);
   }
@@ -144,8 +147,37 @@ function addVideoTile(track, participant, isLocal) {
 
   tile.appendChild(video);
   tile.appendChild(label);
+
+  if (!isLocal) {
+    const muteBtn = document.createElement('button');
+    muteBtn.className = 'tile-mute';
+    muteBtn.type = 'button';
+    updateMuteButton(muteBtn, participant.identity);
+    muteBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleParticipantMute(participant.identity);
+      updateMuteButton(muteBtn, participant.identity);
+    });
+    tile.appendChild(muteBtn);
+  }
+
   grid.appendChild(tile);
   state.tiles.set(track.sid, tile);
+}
+
+function toggleParticipantMute(identity) {
+  const shouldMute = !state.mutedParticipants.has(identity);
+  if (shouldMute) state.mutedParticipants.add(identity);
+  else state.mutedParticipants.delete(identity);
+  audioSink
+    .querySelectorAll(`audio[data-participant="${CSS.escape(identity)}"]`)
+    .forEach((el) => { el.muted = shouldMute; });
+}
+
+function updateMuteButton(btn, identity) {
+  const muted = state.mutedParticipants.has(identity);
+  btn.textContent = muted ? 'Desmutar' : 'Mutar';
+  btn.classList.toggle('active', muted);
 }
 
 function removeTile(sid) {
@@ -248,6 +280,7 @@ function onDisconnected() {
   grid.innerHTML = '';
   audioSink.innerHTML = '';
   state.tiles.clear();
+  state.mutedParticipants.clear();
   state.room = null;
   state.screenSharing = false;
   state.micEnabled = false;

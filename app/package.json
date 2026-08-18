@@ -1,6 +1,6 @@
 {
   "name": "tela",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Compartilhamento de tela entre amigos via LiveKit",
   "author": "lukeribeiro95",
   "main": "main.js",

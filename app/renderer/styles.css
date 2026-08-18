@@ -135,6 +135,32 @@ header {
   font-size: 12px;
 }
 
+.tile-mute {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.tile-mute:hover {
+  background: rgba(0, 0, 0, 0.9);
+}
+
+.tile-mute.active {
+  background: #d05656;
+}
+
+.tile-mute.active:hover {
+  background: #dd6a6a;
+}
+
 .picker {
   position: fixed;
   inset: 0;
