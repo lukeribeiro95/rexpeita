@@ -9,4 +9,6 @@ contextBridge.exposeInMainWorld('telaAPI', {
   respondPickSource: (sourceId) => {
     ipcRenderer.send('tela:pick-source-response', sourceId ?? null);
   },
+  saveRecording: (buffer, defaultName) =>
+    ipcRenderer.invoke('tela:save-recording', { buffer, defaultName }),
 });

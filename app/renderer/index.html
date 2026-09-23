@@ -27,13 +27,16 @@
   <section id="room-view" class="hidden">
     <header>
       <span id="roomLabel"></span>
+      <span id="roomErr" class="err inline"></span>
       <div class="controls">
         <button id="shareBtn">Compartilhar tela</button>
         <button id="micBtn">Ligar microfone</button>
         <button id="leaveBtn" class="danger">Sair</button>
       </div>
     </header>
-    <main id="grid"></main>
+    <main id="grid">
+      <aside id="sidebar" class="hidden"></aside>
+    </main>
     <div id="audio-sink" class="hidden"></div>
   </section>
 
@@ -47,6 +50,10 @@
         <button class="tab active" data-tab="screen">Telas</button>
         <button class="tab" data-tab="window">Janelas</button>
       </div>
+      <label id="pickerAudioOpt" class="picker-audio-opt hidden">
+        <input type="checkbox" id="pickerCaptureAudio">
+        <span>Capturar áudio só desta janela (evita vazamento de Discord/Spotify — mas só funciona se a janela estiver tocando áudio)</span>
+      </label>
       <div id="pickerList" class="picker-list"></div>
     </div>
   </div>
