@@ -138,6 +138,9 @@ async function toggleMic() {
 
 function onTrackSubscribed(track, _pub, participant) {
   if (track.kind === Track.Kind.Video) {
+    if (_pub.source === Track.Source.ScreenShare) {
+      autoMuteParticipant(participant.identity);
+    }
     addVideoTile(track, participant, false);
   } else if (track.kind === Track.Kind.Audio) {
     const el = track.attach();
@@ -146,6 +149,14 @@ function onTrackSubscribed(track, _pub, participant) {
     audioSink.appendChild(el);
     state.tiles.set(track.sid, el);
   }
+}
+
+function autoMuteParticipant(identity) {
+  if (state.mutedParticipants.has(identity)) return;
+  state.mutedParticipants.add(identity);
+  audioSink
+    .querySelectorAll(`audio[data-participant="${CSS.escape(identity)}"]`)
+    .forEach((el) => { el.muted = true; });
 }
 
 function onTrackUnsubscribed(track) {
