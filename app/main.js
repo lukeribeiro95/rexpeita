@@ -1,9 +1,11 @@
 const { app, BrowserWindow, session, desktopCapturer, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { spawn } = require('child_process');
 
 let mainWindow = null;
 let pendingPick = null;
+let loopback = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -34,15 +36,20 @@ function createWindow() {
         if (!chosen) return callback({});
         const isWindow = chosen.id.startsWith('window:');
         let audio;
+        let audioMode = 'none';
         if (process.platform === 'win32') {
-          audio = isWindow && pick.captureAudio ? chosen : 'loopback';
+          if (isWindow && pick.captureAudio) {
+            audio = chosen;
+            audioMode = 'per-window';
+          } else if (await startLoopback()) {
+            audioMode = 'system-without-tela';
+          } else {
+            audio = 'loopback';
+            audioMode = 'loopback';
+          }
         }
-        console.log('[tela] sharing source', {
-          id: chosen.id,
-          name: chosen.name,
-          audioMode: audio === 'loopback' ? 'loopback' : audio ? 'per-window' : 'none',
-        });
-        callback({ video: chosen, audio });
+        console.log('[tela] sharing source', { id: chosen.id, name: chosen.name, audioMode });
+        callback(audio ? { video: chosen, audio } : { video: chosen });
       } catch (e) {
         console.error('display media handler error', e);
         callback({});
@@ -51,6 +58,66 @@ function createWindow() {
   );
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+}
+
+function loopbackExePath() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'tela-loopback.exe')
+    : path.join(__dirname, 'native', 'bin', 'tela-loopback.exe');
+}
+
+// Captura o audio do sistema inteiro menos o do proprio Tela, pra quem esta
+// na chamada nao ouvir a propria voz de volta no audio da tela.
+function startLoopback() {
+  stopLoopback();
+  return new Promise((resolve) => {
+    let proc;
+    try {
+      proc = spawn(loopbackExePath(), [String(process.pid)], { windowsHide: true });
+    } catch (e) {
+      console.error('[tela] loopback spawn error', e);
+      return resolve(false);
+    }
+    const timer = setTimeout(() => {
+      proc.kill();
+      resolve(false);
+    }, 3000);
+    let leftover = Buffer.alloc(0);
+
+    proc.on('error', (e) => {
+      console.error('[tela] loopback error', e);
+      clearTimeout(timer);
+      resolve(false);
+    });
+    proc.stderr.on('data', (d) => {
+      const text = d.toString().trim();
+      if (/^ready$/m.test(text)) {
+        clearTimeout(timer);
+        loopback = proc;
+        resolve(true);
+      } else {
+        console.error('[tela] loopback:', text);
+      }
+    });
+    proc.stdout.on('data', (chunk) => {
+      if (loopback !== proc || !mainWindow || mainWindow.isDestroyed()) return;
+      const data = leftover.length ? Buffer.concat([leftover, chunk]) : chunk;
+      const usable = data.length - (data.length % 4);
+      leftover = Buffer.from(data.subarray(usable));
+      if (usable) mainWindow.webContents.send('tela:loopback-data', Buffer.from(data.subarray(0, usable)));
+    });
+    proc.on('exit', () => {
+      clearTimeout(timer);
+      if (loopback === proc) loopback = null;
+      resolve(false);
+    });
+  });
+}
+
+function stopLoopback() {
+  if (!loopback) return;
+  loopback.kill();
+  loopback = null;
 }
 
 function requestPick(sources) {
@@ -91,7 +158,12 @@ ipcMain.handle('tela:save-recording', async (_e, { buffer, defaultName }) => {
   return { saved: true, path: result.filePath };
 });
 
+ipcMain.handle('tela:loopback-active', () => loopback !== null);
+ipcMain.on('tela:loopback-stop', stopLoopback);
+
 app.whenReady().then(createWindow);
+
+app.on('before-quit', stopLoopback);
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();

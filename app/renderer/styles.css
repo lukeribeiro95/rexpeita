@@ -258,10 +258,35 @@ header {
   50% { opacity: 0.3; }
 }
 
-.tile-mute {
+.tile-mutes {
   position: absolute;
   top: 8px;
   right: 8px;
+  display: flex;
+  gap: 6px;
+}
+
+#participants {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 20px;
+  background: #222227;
+  border-bottom: 1px solid #333;
+}
+
+.peer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px 4px 10px;
+  font-size: 13px;
+  color: #ddd;
+  background: #2e2e35;
+  border-radius: 6px;
+}
+
+.tile-mute {
   padding: 4px 10px;
   font-size: 11px;
   font-weight: 500;

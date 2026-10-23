@@ -11,4 +11,11 @@ contextBridge.exposeInMainWorld('telaAPI', {
   },
   saveRecording: (buffer, defaultName) =>
     ipcRenderer.invoke('tela:save-recording', { buffer, defaultName }),
+  isLoopbackActive: () => ipcRenderer.invoke('tela:loopback-active'),
+  stopLoopback: () => ipcRenderer.send('tela:loopback-stop'),
+  onLoopbackData: (handler) => {
+    const listener = (_e, bytes) => handler(bytes);
+    ipcRenderer.on('tela:loopback-data', listener);
+    return () => ipcRenderer.removeListener('tela:loopback-data', listener);
+  },
 });

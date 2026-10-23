@@ -1,4 +1,4 @@
-const { Room, RoomEvent, Track } = LivekitClient;
+const { Room, RoomEvent, Track, AudioPresets } = LivekitClient;
 
 const $ = (id) => document.getElementById(id);
 const grid = $('grid');
@@ -10,11 +10,56 @@ const state = {
   tiles: new Map(),
   micEnabled: false,
   screenSharing: false,
-  mutedParticipants: new Set(),
+  mutedMic: new Set(),
+  mutedScreen: new Set(),
   joining: false,
   focusedSid: null,
   recordings: new Map(),
+  systemAudio: null,
 };
+
+// Toca no AudioContext o PCM (16-bit, 48 kHz, estereo) que vem do tela-loopback.exe.
+const SYSTEM_AUDIO_WORKLET = `
+class PcmPlayer extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.buf = new Float32Array(48000 * 2);
+    this.read = 0;
+    this.write = 0;
+    this.size = 0;
+    this.port.onmessage = (e) => this.push(new Int16Array(e.data));
+  }
+  push(pcm) {
+    const cap = this.buf.length;
+    for (let i = 0; i < pcm.length; i++) {
+      this.buf[this.write] = pcm[i] / 32768;
+      this.write = (this.write + 1) % cap;
+    }
+    this.size += pcm.length;
+    // segura a latencia: se acumular mais de 100ms, pula pra 40ms do fim
+    if (this.size > 9600) {
+      this.size = 3840;
+      this.read = (this.write - this.size + cap) % cap;
+    }
+  }
+  process(_inputs, outputs) {
+    const [left, right] = outputs[0];
+    for (let i = 0; i < left.length; i++) {
+      if (this.size >= 2) {
+        left[i] = this.buf[this.read];
+        right[i] = this.buf[this.read + 1];
+        this.read = (this.read + 2) % this.buf.length;
+        this.size -= 2;
+      } else {
+        left[i] = 0;
+        right[i] = 0;
+      }
+    }
+    return true;
+  }
+}
+registerProcessor('pcm-player', PcmPlayer);
+`;
 
 const saved = JSON.parse(localStorage.getItem('tela:config') || '{}');
 $('name').value = saved.name || '';
@@ -80,7 +125,8 @@ async function join() {
       .on(RoomEvent.TrackUnsubscribed, onTrackUnsubscribed)
       .on(RoomEvent.LocalTrackPublished, onLocalTrackPublished)
       .on(RoomEvent.LocalTrackUnpublished, onLocalTrackUnpublished)
-      .on(RoomEvent.ParticipantConnected, (p) => state.mutedParticipants.add(p.identity))
+      .on(RoomEvent.ParticipantConnected, renderParticipants)
+      .on(RoomEvent.ParticipantDisconnected, renderParticipants)
       .on(RoomEvent.Disconnected, onDisconnected);
 
     try {
@@ -91,7 +137,7 @@ async function join() {
       return;
     }
 
-    room.remoteParticipants.forEach((p) => state.mutedParticipants.add(p.identity));
+    renderParticipants();
 
     $('roomLabel').textContent = `Sala ${roomName} — ${name}`;
     $('join').classList.add('hidden');
@@ -112,10 +158,13 @@ async function toggleShare() {
   errEl.textContent = '';
   try {
     state.screenSharing = !state.screenSharing;
+    if (!state.screenSharing) await stopSystemAudio();
     await p.setScreenShareEnabled(state.screenSharing, { audio: true });
+    if (state.screenSharing) await startSystemAudio();
     btn.textContent = state.screenSharing ? 'Parar compartilhamento' : 'Compartilhar tela';
   } catch (e) {
     state.screenSharing = !state.screenSharing;
+    stopSystemAudio();
     console.error('share error', e);
     const msg = e?.message || String(e);
     if (/audio source/i.test(msg)) {
@@ -128,35 +177,114 @@ async function toggleShare() {
   }
 }
 
+// Publica o audio do sistema (sem o som do proprio Tela) quando o main
+// conseguiu iniciar o tela-loopback.exe; senao o audio ja veio pelo getDisplayMedia.
+async function startSystemAudio() {
+  if (!(await window.telaAPI?.isLoopbackActive())) return;
+  const ctx = new AudioContext({ sampleRate: 48000 });
+  let off = null;
+  try {
+    const url = URL.createObjectURL(new Blob([SYSTEM_AUDIO_WORKLET], { type: 'application/javascript' }));
+    await ctx.audioWorklet.addModule(url);
+    URL.revokeObjectURL(url);
+    const node = new AudioWorkletNode(ctx, 'pcm-player', {
+      numberOfInputs: 0,
+      outputChannelCount: [2],
+    });
+    const dest = ctx.createMediaStreamDestination();
+    node.connect(dest);
+    await ctx.resume();
+    off = window.telaAPI.onLoopbackData((bytes) => {
+      const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+      node.port.postMessage(copy, [copy]);
+    });
+    const track = dest.stream.getAudioTracks()[0];
+    state.systemAudio = { ctx, off, track };
+    await state.room.localParticipant.publishTrack(track, {
+      source: Track.Source.ScreenShareAudio,
+      name: 'screen_audio',
+      dtx: false,
+      red: false,
+      forceStereo: true,
+      audioPreset: AudioPresets.musicHighQualityStereo,
+    });
+  } catch (e) {
+    console.error('system audio error', e);
+    $('roomErr').textContent = `Falha no audio da tela: ${e?.message || e}`;
+    if (!state.systemAudio) {
+      off?.();
+      ctx.close();
+    }
+    await stopSystemAudio();
+  }
+}
+
+async function stopSystemAudio() {
+  window.telaAPI?.stopLoopback();
+  const sa = state.systemAudio;
+  if (!sa) return;
+  state.systemAudio = null;
+  sa.off();
+  try {
+    await state.room?.localParticipant.unpublishTrack(sa.track);
+  } catch (e) {
+    console.error('unpublish system audio error', e);
+  }
+  sa.track.stop();
+  sa.ctx.close();
+}
+
 async function toggleMic() {
   const p = state.room?.localParticipant;
   if (!p) return;
-  state.micEnabled = !state.micEnabled;
-  await p.setMicrophoneEnabled(state.micEnabled);
+  try {
+    await p.setMicrophoneEnabled(!state.micEnabled);
+    state.micEnabled = !state.micEnabled;
+    $('roomErr').textContent = '';
+  } catch (e) {
+    console.error('mic error', e);
+    $('roomErr').textContent = `Falha no microfone: ${e?.message || e}`;
+  }
   $('micBtn').textContent = state.micEnabled ? 'Mutar microfone' : 'Ligar microfone';
 }
 
 function onTrackSubscribed(track, _pub, participant) {
   if (track.kind === Track.Kind.Video) {
     if (_pub.source === Track.Source.ScreenShare) {
-      autoMuteParticipant(participant.identity);
+      autoMuteScreen(participant.identity);
     }
     addVideoTile(track, participant, false);
   } else if (track.kind === Track.Kind.Audio) {
     const el = track.attach();
+    const kind = _pub.source === Track.Source.ScreenShareAudio ? 'screen' : 'mic';
     el.dataset.participant = participant.identity;
-    if (state.mutedParticipants.has(participant.identity)) el.muted = true;
+    el.dataset.kind = kind;
+    el.muted = muteSet(kind).has(participant.identity);
     audioSink.appendChild(el);
     state.tiles.set(track.sid, el);
   }
 }
 
-function autoMuteParticipant(identity) {
-  if (state.mutedParticipants.has(identity)) return;
-  state.mutedParticipants.add(identity);
-  audioSink
-    .querySelectorAll(`audio[data-participant="${CSS.escape(identity)}"]`)
-    .forEach((el) => { el.muted = true; });
+function autoMuteScreen(identity) {
+  if (state.mutedScreen.has(identity)) return;
+  setMuted('screen', identity, true);
+}
+
+function renderParticipants() {
+  const bar = $('participants');
+  bar.innerHTML = '';
+  const peers = Array.from(state.room?.remoteParticipants.values() || []);
+  bar.classList.toggle('hidden', peers.length === 0);
+  peers.forEach((p) => {
+    const chip = document.createElement('div');
+    chip.className = 'peer';
+    const name = document.createElement('span');
+    name.textContent = p.identity;
+    chip.appendChild(name);
+    chip.appendChild(createMuteButton('mic', p.identity));
+    chip.appendChild(createMuteButton('screen', p.identity));
+    bar.appendChild(chip);
+  });
 }
 
 function onTrackUnsubscribed(track) {
@@ -171,6 +299,7 @@ function onLocalTrackPublished(pub, participant) {
 }
 
 function onLocalTrackUnpublished(pub) {
+  if (pub.source === Track.Source.ScreenShare) stopSystemAudio();
   if (pub.track) removeTile(pub.track.sid);
 }
 
@@ -216,16 +345,11 @@ function addVideoTile(track, participant, isLocal) {
   tile.appendChild(recBtn);
 
   if (!isLocal) {
-    const muteBtn = document.createElement('button');
-    muteBtn.className = 'tile-mute';
-    muteBtn.type = 'button';
-    updateMuteButton(muteBtn, participant.identity);
-    muteBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggleParticipantMute(participant.identity);
-      updateMuteButton(muteBtn, participant.identity);
-    });
-    tile.appendChild(muteBtn);
+    const mutes = document.createElement('div');
+    mutes.className = 'tile-mutes';
+    mutes.appendChild(createMuteButton('mic', participant.identity));
+    mutes.appendChild(createMuteButton('screen', participant.identity));
+    tile.appendChild(mutes);
   }
 
   attachZoomHandlers(tile, viewport);
@@ -365,18 +489,41 @@ function updateLayout() {
   });
 }
 
-function toggleParticipantMute(identity) {
-  const shouldMute = !state.mutedParticipants.has(identity);
-  if (shouldMute) state.mutedParticipants.add(identity);
-  else state.mutedParticipants.delete(identity);
-  audioSink
-    .querySelectorAll(`audio[data-participant="${CSS.escape(identity)}"]`)
-    .forEach((el) => { el.muted = shouldMute; });
+function muteSet(kind) {
+  return kind === 'screen' ? state.mutedScreen : state.mutedMic;
 }
 
-function updateMuteButton(btn, identity) {
-  const muted = state.mutedParticipants.has(identity);
-  btn.textContent = muted ? 'Desmutar' : 'Mutar';
+function setMuted(kind, identity, muted) {
+  const set = muteSet(kind);
+  if (muted) set.add(identity);
+  else set.delete(identity);
+  audioSink
+    .querySelectorAll(`audio[data-participant="${CSS.escape(identity)}"][data-kind="${kind}"]`)
+    .forEach((el) => { el.muted = muted; });
+  document
+    .querySelectorAll(`button[data-mute-kind="${kind}"][data-participant="${CSS.escape(identity)}"]`)
+    .forEach(updateMuteButton);
+}
+
+function createMuteButton(kind, identity) {
+  const btn = document.createElement('button');
+  btn.className = 'tile-mute';
+  btn.type = 'button';
+  btn.dataset.muteKind = kind;
+  btn.dataset.participant = identity;
+  updateMuteButton(btn);
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    setMuted(kind, identity, !muteSet(kind).has(identity));
+  });
+  return btn;
+}
+
+function updateMuteButton(btn) {
+  const kind = btn.dataset.muteKind;
+  const muted = muteSet(kind).has(btn.dataset.participant);
+  const what = kind === 'screen' ? 'som da tela' : 'mic';
+  btn.textContent = `${muted ? 'Desmutar' : 'Mutar'} ${what}`;
   btn.classList.toggle('active', muted);
 }
 
@@ -577,11 +724,15 @@ function cancelPicker() {
 
 function onDisconnected() {
   stopAllRecordings();
+  stopSystemAudio();
   getVideoTiles().forEach((el) => el.remove());
   sidebar.classList.add('hidden');
   audioSink.innerHTML = '';
   state.tiles.clear();
-  state.mutedParticipants.clear();
+  state.mutedMic.clear();
+  state.mutedScreen.clear();
+  $('participants').innerHTML = '';
+  $('participants').classList.add('hidden');
   state.room = null;
   state.screenSharing = false;
   state.micEnabled = false;
