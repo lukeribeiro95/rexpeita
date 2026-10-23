@@ -6,7 +6,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build:native": "native\build.cmd",
+    "build:native": "native\\build.cmd",
     "dist": "npm run build:native && electron-builder"
   },
   "devDependencies": {
