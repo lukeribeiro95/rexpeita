@@ -1,6 +1,6 @@
 {
   "name": "tela",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "description": "Compartilhamento de tela entre amigos via LiveKit",
   "author": "lukeribeiro95",
   "main": "main.js",
@@ -14,6 +14,7 @@
     "electron-builder": "^25.1.8"
   },
   "dependencies": {
+    "@sapphi-red/web-noise-suppressor": "^0.4.1",
     "livekit-client": "^2.5.0"
   },
   "build": {
@@ -27,12 +28,25 @@
       "!native/**"
     ],
     "extraResources": [
-      { "from": "native/bin/tela-loopback.exe", "to": "tela-loopback.exe" }
+      {
+        "from": "native/bin/tela-loopback.exe",
+        "to": "tela-loopback.exe"
+      }
     ],
     "win": {
       "target": [
-        { "target": "nsis", "arch": ["x64"] },
-        { "target": "portable", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ]
     },
     "nsis": {

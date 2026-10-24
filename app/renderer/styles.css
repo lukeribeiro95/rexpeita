@@ -237,6 +237,42 @@ header {
   opacity: 1;
 }
 
+.tile-fs {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.tile:hover .tile-fs {
+  opacity: 1;
+}
+
+.tile-fs:hover {
+  background: rgba(0, 0, 0, 0.9);
+}
+
+.tile:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  aspect-ratio: auto;
+  border-radius: 0;
+}
+
+.tile:fullscreen .label {
+  display: none;
+}
+
 .tile-rec.recording {
   background: #d05656;
 }
@@ -353,6 +389,11 @@ button.ghost {
 button.ghost:hover:not(:disabled) {
   background: #1a1a1e;
   color: #fff;
+}
+
+button.ghost.active {
+  color: #8fd19e;
+  border-color: #3f7a4e;
 }
 
 .picker-tabs {

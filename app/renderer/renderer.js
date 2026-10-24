@@ -16,6 +16,7 @@ const state = {
   focusedSid: null,
   recordings: new Map(),
   systemAudio: null,
+  noiseFilter: localStorage.getItem('tela:noiseFilter') !== 'off',
 };
 
 // Toca no AudioContext o PCM (16-bit, 48 kHz, estereo) que vem do tela-loopback.exe.
@@ -70,6 +71,8 @@ $('joinBtn').addEventListener('click', join);
 $('leaveBtn').addEventListener('click', () => state.room?.disconnect());
 $('shareBtn').addEventListener('click', toggleShare);
 $('micBtn').addEventListener('click', toggleMic);
+$('noiseBtn').addEventListener('click', toggleNoiseFilter);
+updateNoiseButton();
 
 setupPicker();
 
@@ -234,6 +237,73 @@ async function stopSystemAudio() {
   sa.ctx.close();
 }
 
+let rnnoiseWasm = null;
+
+// Filtro de ruido com IA (RNNoise) aplicado no microfone, como processor do LiveKit.
+function createNoiseFilter() {
+  let ctx = null;
+  let source = null;
+  let node = null;
+  return {
+    name: 'tela-rnnoise',
+    processedTrack: undefined,
+    async init({ track }) {
+      // RNNoise assume 48 kHz, entao usa um AudioContext proprio
+      ctx = new AudioContext({ sampleRate: 48000 });
+      await ctx.audioWorklet.addModule('vendor/rnnoise/workletProcessor.js');
+      if (!rnnoiseWasm) {
+        rnnoiseWasm = await (await fetch('vendor/rnnoise/rnnoise_simd.wasm')).arrayBuffer();
+      }
+      source = ctx.createMediaStreamSource(new MediaStream([track]));
+      node = new AudioWorkletNode(ctx, '@sapphi-red/web-noise-suppressor/rnnoise', {
+        processorOptions: { maxChannels: 1, wasmBinary: rnnoiseWasm },
+      });
+      const dest = ctx.createMediaStreamDestination();
+      source.connect(node).connect(dest);
+      await ctx.resume();
+      this.processedTrack = dest.stream.getAudioTracks()[0];
+    },
+    async restart(opts) {
+      await this.destroy();
+      await this.init(opts);
+    },
+    async destroy() {
+      source?.disconnect();
+      node?.port.postMessage('destroy');
+      node?.disconnect();
+      await ctx?.close();
+      ctx = source = node = null;
+      this.processedTrack = undefined;
+    },
+  };
+}
+
+async function applyNoiseFilter() {
+  const track = state.room?.localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack;
+  if (!track) return;
+  const active = track.getProcessor()?.name === 'tela-rnnoise';
+  try {
+    if (state.noiseFilter && !active) await track.setProcessor(createNoiseFilter());
+    else if (!state.noiseFilter && active) await track.stopProcessor();
+  } catch (e) {
+    console.error('noise filter error', e);
+    $('roomErr').textContent = `Falha no filtro de ruido: ${e?.message || e}`;
+  }
+}
+
+async function toggleNoiseFilter() {
+  state.noiseFilter = !state.noiseFilter;
+  localStorage.setItem('tela:noiseFilter', state.noiseFilter ? 'on' : 'off');
+  updateNoiseButton();
+  await applyNoiseFilter();
+}
+
+function updateNoiseButton() {
+  const btn = $('noiseBtn');
+  btn.textContent = `Filtro de ruido: ${state.noiseFilter ? 'ligado' : 'desligado'}`;
+  btn.classList.toggle('active', state.noiseFilter);
+}
+
 async function toggleMic() {
   const p = state.room?.localParticipant;
   if (!p) return;
@@ -241,6 +311,7 @@ async function toggleMic() {
     await p.setMicrophoneEnabled(!state.micEnabled);
     state.micEnabled = !state.micEnabled;
     $('roomErr').textContent = '';
+    if (state.micEnabled) await applyNoiseFilter();
   } catch (e) {
     console.error('mic error', e);
     $('roomErr').textContent = `Falha no microfone: ${e?.message || e}`;
@@ -339,10 +410,20 @@ function addVideoTile(track, participant, isLocal) {
     toggleRecording(track, participant, recBtn);
   });
 
+  const fsBtn = document.createElement('button');
+  fsBtn.className = 'tile-fs';
+  fsBtn.type = 'button';
+  fsBtn.textContent = 'Tela cheia';
+  fsBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleFullscreen(tile);
+  });
+
   tile.appendChild(viewport);
   tile.appendChild(label);
   tile.appendChild(focusBtn);
   tile.appendChild(recBtn);
+  tile.appendChild(fsBtn);
 
   if (!isLocal) {
     const mutes = document.createElement('div');
@@ -389,7 +470,7 @@ function attachZoomHandlers(tile, viewport) {
 
   tile.addEventListener('wheel', (e) => {
     e.preventDefault();
-    const inFocusMode = grid.classList.contains('focus-mode');
+    const inFocusMode = grid.classList.contains('focus-mode') || document.fullscreenElement === tile;
     const resizeTile = !e.ctrlKey && !inFocusMode;
 
     if (resizeTile) {
@@ -418,7 +499,7 @@ function attachZoomHandlers(tile, viewport) {
   let dragging = null;
   tile.addEventListener('mousedown', (e) => {
     if (st.zoom <= 1) return;
-    if (e.target.closest('.tile-mute') || e.target.closest('.tile-focus')) return;
+    if (e.target.closest('button')) return;
     dragging = { sx: e.clientX, sy: e.clientY, ix: st.x, iy: st.y };
     tile.classList.add('dragging');
     e.preventDefault();
@@ -439,7 +520,7 @@ function attachZoomHandlers(tile, viewport) {
   window.addEventListener('mouseup', onUp);
 
   tile.addEventListener('dblclick', (e) => {
-    if (e.target.closest('.tile-mute') || e.target.closest('.tile-focus')) return;
+    if (e.target.closest('button')) return;
     st.zoom = 1;
     st.x = 0;
     st.y = 0;
@@ -448,6 +529,17 @@ function attachZoomHandlers(tile, viewport) {
     applyScale();
   });
 }
+
+function toggleFullscreen(tile) {
+  if (document.fullscreenElement === tile) document.exitFullscreen();
+  else tile.requestFullscreen().catch((e) => console.error('fullscreen error', e));
+}
+
+document.addEventListener('fullscreenchange', () => {
+  document.querySelectorAll('.tile-fs').forEach((btn) => {
+    btn.textContent = btn.parentElement === document.fullscreenElement ? 'Sair da tela cheia' : 'Tela cheia';
+  });
+});
 
 function toggleFocus(sid) {
   state.focusedSid = state.focusedSid === sid ? null : sid;
